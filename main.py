@@ -35,7 +35,6 @@ def make_keyboard(board, game_id):
     markup.add(*btns)
     return markup
 
-# ጓደኛን ለመጋበዝ
 @bot.message_handler(commands=['start', 'play'])
 def start(message):
     markup = types.InlineKeyboardMarkup()
@@ -43,42 +42,62 @@ def start(message):
     markup.add(invite_btn)
     bot.send_message(message.chat.id, "ጓደኛህን ለመጋበዝ ከታች ያለውን በተን ተጫን፡", reply_markup=markup)
 
-# Inline Query ሲላክ (ጓደኛህ ሲጋበዝ)
 @bot.inline_handler(lambda query: query.query == 'play')
 def query_text(inline_query):
-    try:
-        game_id = str(inline_query.from_user.id)
-        games[game_id] = {"board": [" " for _ in range(9)], "turn": "X", "active": True}
-        
-        r = types.InlineQueryResultArticle(
-            '1', 'ቲክ-ታክ-ቶ (XO) ጨዋታ',
-            types.InputTextMessageContent(f"የ {inline_query.from_user.first_name} የቲክ-ታክ-ቶ ጨዋታ ተጀምሯል! የ X ተራ ነው፡"),
-            reply_markup=make_keyboard(games[game_id]["board"], game_id)
-        )
-        bot.answer_inline_query(inline_query.id, [r])
-    except Exception as e:
-        print(e)
+    game_id = str(inline_query.from_user.id)
+    # ተጫዋች 1 (X) ጨዋታውን የጀመረው ሰው ነው
+    games[game_id] = {
+        "board": [" " for _ in range(9)], 
+        "turn": "X", 
+        "active": True,
+        "player_x": inline_query.from_user.id,
+        "player_o": None # ሁለተኛው ተጫዋች ገና አልታወቀም
+    }
+    
+    r = types.InlineQueryResultArticle(
+        '1', 'ቲክ-ታክ-ቶ (XO) ጨዋታ',
+        types.InputTextMessageContent(f"የ {inline_query.from_user.first_name} የቲክ-ታክ-ቶ ጨዋታ! የ X ተራ ነው፡"),
+        reply_markup=make_keyboard(games[game_id]["board"], game_id)
+    )
+    bot.answer_inline_query(inline_query.id, [r], cache_time=1)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("play_"))
 def handle_play(call):
     data = call.data.split("_")
     game_id = data[1]
     idx = int(data[2])
+    user_id = call.from_user.id
     
-    if game_id not in games or not games[game_id]["active"]: return
-    
-    if games[game_id]["board"][idx] == " ":
-        games[game_id]["board"][idx] = games[game_id]["turn"]
-        res = check_winner(games[game_id]["board"])
+    if game_id not in games or not games[game_id]["active"]:
+        return
+
+    game = games[game_id]
+
+    # የ 'O' ተጫዋች ገና ካልተወሰነ እና የጀመረው ሰው ካልሆነ፣ እሱን 'O' አድርገው
+    if game["player_o"] is None and user_id != game["player_x"]:
+        game["player_o"] = user_id
+
+    # ተራው የማን እንደሆነ ቼክ አድርግ
+    current_player_id = game["player_x"] if game["turn"] == "X" else game["player_o"]
+
+    if user_id != current_player_id:
+        bot.answer_callback_query(call.id, "ተራው ያንተ አይደለም! ቆይ።", show_alert=True)
+        return
+
+    if game["board"][idx] == " ":
+        game["board"][idx] = game["turn"]
+        res = check_winner(game["board"])
         
         if res:
-            games[game_id]["active"] = False
-            msg = "አቻ!" if res == "Draw" else f"{res} አሸንፏል! 🎉"
+            game["active"] = False
+            msg = "አቻ!" if res == "Draw" else f"አሸናፊ፡ {res} 🎉"
         else:
-            games[game_id]["turn"] = "O" if games[game_id]["turn"] == "X" else "X"
-            msg = f"የ {games[game_id]['turn']} ተራ ነው፡"
+            game["turn"] = "O" if game["turn"] == "X" else "X"
+            msg = f"የ {game['turn']} ተራ ነው፡"
             
-        bot.edit_message_text(msg, inline_message_id=call.inline_message_id, reply_markup=make_keyboard(games[game_id]["board"], game_id))
+        bot.edit_message_text(msg, inline_message_id=call.inline_message_id, reply_markup=make_keyboard(game["board"], game_id))
+    else:
+        bot.answer_callback_query(call.id, "ይህ ቦታ ተይዟል!")
 
 if __name__ == "__main__":
     keep_alive()

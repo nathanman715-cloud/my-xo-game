@@ -18,7 +18,6 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# ያንተን ቶክን እዚህ ጋር አስገባ
 TOKEN = '8207112274:AAFtlY5nzzvtT4a87x3HcXgqd5No8IiKMx8'
 bot = telebot.TeleBot(TOKEN)
 games = {}
@@ -30,48 +29,56 @@ def check_winner(board):
             return board[c[0]]
     return "Draw" if " " not in board else None
 
-def make_keyboard(board, include_invite=False):
+def make_keyboard(board, game_id):
     markup = types.InlineKeyboardMarkup(row_width=3)
-    btns = [types.InlineKeyboardButton(board[i] if board[i] != " " else "⬜", callback_data=str(i)) for i in range(9)]
+    btns = [types.InlineKeyboardButton(board[i] if board[i] != " " else "⬜", callback_data=f"play_{game_id}_{i}") for i in range(9)]
     markup.add(*btns)
-    
-    if include_invite:
-        # ጓደኛ መጋበዣ በተን
-        invite_btn = types.InlineKeyboardButton("👥 ጓደኛ ይጋብዙ", switch_inline_query="ና አብረን የቲክ-ታክ-ቶ (XO) ጨዋታ እንጫወት!")
-        markup.row(invite_btn)
-    
     return markup
 
+# ጓደኛን ለመጋበዝ
 @bot.message_handler(commands=['start', 'play'])
 def start(message):
-    games[message.chat.id] = {"board": [" " for _ in range(9)], "turn": "X", "active": True}
-    bot.send_message(message.chat.id, "ቲክ-ታክ-ቶ ተጀምሯል! የ X ተራ ነው፡", reply_markup=make_keyboard(games[message.chat.id]["board"], include_invite=True))
+    markup = types.InlineKeyboardMarkup()
+    invite_btn = types.InlineKeyboardButton("👥 ጓደኛ ይጋብዙ", switch_inline_query="play")
+    markup.add(invite_btn)
+    bot.send_message(message.chat.id, "ጓደኛህን ለመጋበዝ ከታች ያለውን በተን ተጫን፡", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle(call):
-    cid = call.message.chat.id
-    if cid not in games or not games[cid]["active"]: return
+# Inline Query ሲላክ (ጓደኛህ ሲጋበዝ)
+@bot.inline_handler(lambda query: query.query == 'play')
+def query_text(inline_query):
+    try:
+        game_id = str(inline_query.from_user.id)
+        games[game_id] = {"board": [" " for _ in range(9)], "turn": "X", "active": True}
+        
+        r = types.InlineQueryResultArticle(
+            '1', 'ቲክ-ታክ-ቶ (XO) ጨዋታ',
+            types.InputTextMessageContent(f"የ {inline_query.from_user.first_name} የቲክ-ታክ-ቶ ጨዋታ ተጀምሯል! የ X ተራ ነው፡"),
+            reply_markup=make_keyboard(games[game_id]["board"], game_id)
+        )
+        bot.answer_inline_query(inline_query.id, [r])
+    except Exception as e:
+        print(e)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("play_"))
+def handle_play(call):
+    data = call.data.split("_")
+    game_id = data[1]
+    idx = int(data[2])
     
-    idx = int(call.data)
-    if games[cid]["board"][idx] == " ":
-        games[cid]["board"][idx] = games[cid]["turn"]
-        res = check_winner(games[cid]["board"])
+    if game_id not in games or not games[game_id]["active"]: return
+    
+    if games[game_id]["board"][idx] == " ":
+        games[game_id]["board"][idx] = games[game_id]["turn"]
+        res = check_winner(games[game_id]["board"])
         
         if res:
-            games[cid]["active"] = False
+            games[game_id]["active"] = False
             msg = "አቻ!" if res == "Draw" else f"{res} አሸንፏል! 🎉"
-            # ጨዋታው ሲያልቅ ድጋሚ መጫወቻ በተን መጨመር ይቻላል
-            markup = make_keyboard(games[cid]["board"])
-            restart_btn = types.InlineKeyboardButton("🔄 ድጋሚ ይጫወቱ", callback_data="restart")
-            markup.row(restart_btn)
         else:
-            games[cid]["turn"] = "O" if games[cid]["turn"] == "X" else "X"
-            msg = f"የ {games[cid]['turn']} ተራ ነው፡"
-            markup = make_keyboard(games[cid]["board"], include_invite=True)
+            games[game_id]["turn"] = "O" if games[game_id]["turn"] == "X" else "X"
+            msg = f"የ {games[game_id]['turn']} ተራ ነው፡"
             
-        try:
-            bot.edit_message_text(msg, cid, call.message.message_id, reply_markup=markup)
-        except: pass
+        bot.edit_message_text(msg, inline_message_id=call.inline_message_id, reply_markup=make_keyboard(games[game_id]["board"], game_id))
 
 if __name__ == "__main__":
     keep_alive()
